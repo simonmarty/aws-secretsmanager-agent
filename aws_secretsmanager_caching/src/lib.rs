@@ -441,6 +441,10 @@ impl SecretsManagerCachingClient {
 
 #[cfg(test)]
 mod tests {
+    use aws_sdk_secretsmanager::operation::{
+        describe_secret::DescribeSecretOutput, get_secret_value::GetSecretValueOutput,
+    };
+    use aws_smithy_mocks::{mock, mock_client, RuleMode};
     use tokio::time::sleep;
 
     use super::*;
@@ -467,8 +471,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_secret_value() {
-        let client = fake_client(None, false, None, None);
         let secret_id = "test_secret";
+
+        let rule = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
+            .match_requests(|req| req.secret_id() == Some(secret_id))
+            .then_output(move || {
+                GetSecretValueOutput::builder()
+                    .name(secret_id)
+                    .arn(asm_mock::FAKE_ARN.replace("{{name}}", secret_id))
+                    .secret_string("hunter2")
+                    .version_stages("AWSCURRENT")
+                    .build()
+            });
+
+        let asm_mock = mock_client!(aws_sdk_secretsmanager, [&rule]);
+
+        let client = SecretsManagerCachingClient::new(
+            asm_mock,
+            NonZeroUsize::new(1000).unwrap(),
+            Duration::from_secs(1000),
+            true,
+        )
+        .unwrap();
 
         let response = client
             .get_secret_value(secret_id, None, None, false)
@@ -493,9 +517,32 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_secret_value_version_id() {
-        let client = fake_client(None, false, None, None);
         let secret_id = "test_secret";
         let version_id = "test_version";
+
+        let rule = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
+            .match_requests(|req| {
+                req.secret_id() == Some(secret_id) && req.version_id() == Some(version_id)
+            })
+            .then_output(move || {
+                GetSecretValueOutput::builder()
+                    .name(secret_id)
+                    .arn(asm_mock::FAKE_ARN.replace("{{name}}", secret_id))
+                    .secret_string("hunter2")
+                    .version_id(version_id)
+                    .version_stages("AWSCURRENT")
+                    .build()
+            });
+
+        let asm_mock = mock_client!(aws_sdk_secretsmanager, [&rule]);
+
+        let client = SecretsManagerCachingClient::new(
+            asm_mock,
+            NonZeroUsize::new(1000).unwrap(),
+            Duration::from_secs(1000),
+            true,
+        )
+        .unwrap();
 
         let response = client
             .get_secret_value(secret_id, Some(version_id), None, false)
@@ -521,9 +568,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_secret_value_version_stage() {
-        let client = fake_client(None, false, None, None);
         let secret_id = "test_secret";
         let stage_label = "STAGEHERE";
+
+        let rule = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
+            .match_requests(|req| {
+                req.secret_id() == Some(secret_id) && req.version_stage() == Some(stage_label)
+            })
+            .then_output(move || {
+                GetSecretValueOutput::builder()
+                    .name(secret_id)
+                    .arn(asm_mock::FAKE_ARN.replace("{{name}}", secret_id))
+                    .secret_string("hunter2")
+                    .version_stages(stage_label)
+                    .build()
+            });
+
+        let asm_mock = mock_client!(aws_sdk_secretsmanager, [&rule]);
+
+        let client = SecretsManagerCachingClient::new(
+            asm_mock,
+            NonZeroUsize::new(1000).unwrap(),
+            Duration::from_secs(1000),
+            true,
+        )
+        .unwrap();
 
         let response = client
             .get_secret_value(secret_id, None, Some(stage_label), false)
@@ -545,10 +614,35 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_secret_value_version_id_and_stage() {
-        let client = fake_client(None, false, None, None);
         let secret_id = "test_secret";
         let version_id = "test_version";
         let stage_label = "STAGEHERE";
+
+        let rule = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
+            .match_requests(|req| {
+                req.secret_id() == Some(secret_id)
+                    && req.version_stage() == Some(stage_label)
+                    && req.version_id() == Some(version_id)
+            })
+            .then_output(move || {
+                GetSecretValueOutput::builder()
+                    .name(secret_id)
+                    .arn(asm_mock::FAKE_ARN.replace("{{name}}", secret_id))
+                    .secret_string("hunter2")
+                    .version_stages(stage_label)
+                    .version_id(version_id)
+                    .build()
+            });
+
+        let asm_mock = mock_client!(aws_sdk_secretsmanager, [&rule]);
+
+        let client = SecretsManagerCachingClient::new(
+            asm_mock,
+            NonZeroUsize::new(1000).unwrap(),
+            Duration::from_secs(1000),
+            true,
+        )
+        .unwrap();
 
         let response = client
             .get_secret_value(secret_id, Some(version_id), Some(stage_label), false)
@@ -571,11 +665,50 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_cache_expired() {
-        let client = fake_client(Some(Duration::from_secs(0)), false, None, None);
         let secret_id = "test_secret";
+        let version_id = "version_id";
+        let version_stage = "AWSCURRENT";
+        let arn = asm_mock::FAKE_ARN.replace("{{name}}", secret_id);
+
+        let gsv = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
+            // .match_requests(|req| req.secret_id() == Some(secret_id))
+            .then_output(move || {
+                GetSecretValueOutput::builder()
+                    .name(secret_id)
+                    .arn(arn.clone())
+                    .secret_string("hunter2")
+                    .version_id(version_id)
+                    .version_stages(version_stage)
+                    .build()
+            });
+
+        let describe_secret =
+            mock!(aws_sdk_secretsmanager::Client::describe_secret).then_output(move || {
+                // Don't serve the same value
+                DescribeSecretOutput::builder()
+                    .name(secret_id)
+                    .version_ids_to_stages("different_version_id", vec![version_stage.into()])
+                    .build()
+            });
+
+        let asm_mock = mock_client!(
+            aws_sdk_secretsmanager,
+            RuleMode::MatchAny,
+            [&gsv, &describe_secret]
+        );
+
+        let client = SecretsManagerCachingClient::new(
+            asm_mock,
+            NonZeroUsize::new(1000).unwrap(),
+            Duration::from_secs(0),
+            true,
+        )
+        .unwrap();
+
+        const TIMES: usize = 2;
 
         // Run through this twice to test the cache expiration
-        for i in 0..2 {
+        for i in 0..TIMES {
             let response = client
                 .get_secret_value(secret_id, None, None, false)
                 .await
@@ -600,6 +733,82 @@ mod tests {
                 sleep(Duration::from_millis(50)).await;
             }
         }
+
+        assert!(gsv.num_calls() == TIMES)
+    }
+
+    #[tokio::test]
+    async fn test_get_cache_is_current_fast_refreshes() {
+        let secret_id = "test_secret";
+        let version_id = "version_id";
+        let version_stage = "AWSCURRENT";
+        let arn = asm_mock::FAKE_ARN.replace("{{name}}", secret_id);
+
+        let gsv = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
+            // .match_requests(|req| req.secret_id() == Some(secret_id))
+            .then_output(move || {
+                GetSecretValueOutput::builder()
+                    .name(secret_id)
+                    .arn(arn.clone())
+                    .secret_string("hunter2")
+                    .version_id(version_id)
+                    .version_stages(version_stage)
+                    .build()
+            });
+
+        let describe_secret =
+            mock!(aws_sdk_secretsmanager::Client::describe_secret).then_output(move || {
+                // Cache is current. We fast-refresh
+                DescribeSecretOutput::builder()
+                    .name(secret_id)
+                    .version_ids_to_stages(version_id, vec![version_stage.into()])
+                    .build()
+            });
+
+        let asm_mock = mock_client!(
+            aws_sdk_secretsmanager,
+            RuleMode::MatchAny,
+            [&gsv, &describe_secret]
+        );
+
+        let client = SecretsManagerCachingClient::new(
+            asm_mock,
+            NonZeroUsize::new(1000).unwrap(),
+            Duration::from_secs(0),
+            true,
+        )
+        .unwrap();
+
+        const TIMES: usize = 2;
+
+        // Run through this twice to test the cache expiration
+        for i in 0..TIMES {
+            let response = client
+                .get_secret_value(secret_id, None, None, false)
+                .await
+                .unwrap();
+
+            assert_eq!(response.name, Some(secret_id.to_string()));
+            assert_eq!(response.secret_string, Some("hunter2".to_string()));
+            assert_eq!(
+                response.arn,
+                Some(
+                    asm_mock::FAKE_ARN
+                        .replace("{{name}}", secret_id)
+                        .to_string()
+                )
+            );
+            assert_eq!(
+                response.version_stages,
+                Some(vec!["AWSCURRENT".to_string()])
+            );
+            // let the entry expire
+            if i == 0 {
+                sleep(Duration::from_millis(50)).await;
+            }
+        }
+
+        assert!(gsv.num_calls() == 1)
     }
 
     #[tokio::test]
