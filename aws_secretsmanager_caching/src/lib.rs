@@ -822,7 +822,8 @@ mod tests {
             }
         }
 
-        assert!(gsv.num_calls() == 1)
+        assert_eq!(gsv.num_calls(), 1);
+        assert_eq!(describe_secret.num_calls(), 1);
     }
 
     #[tokio::test]
@@ -889,7 +890,8 @@ mod tests {
             }
         }
 
-        assert!(gsv.num_calls() == 1)
+        assert_eq!(gsv.num_calls(), 1);
+        assert_eq!(describe_secret.num_calls(), 1);
     }
 
     #[tokio::test]
@@ -956,7 +958,8 @@ mod tests {
             }
         }
 
-        assert!(gsv.num_calls() == 1)
+        assert_eq!(gsv.num_calls(), 1);
+        assert_eq!(describe_secret.num_calls(), 1);
     }
 
     #[tokio::test]
@@ -1025,7 +1028,8 @@ mod tests {
             }
         }
 
-        assert!(gsv.num_calls() == 1)
+        assert_eq!(gsv.num_calls(), 1);
+        assert_eq!(describe_secret.num_calls(), 1);
     }
 
     #[tokio::test]
