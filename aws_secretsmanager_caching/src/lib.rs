@@ -691,7 +691,7 @@ mod tests {
             }
         }
 
-        assert!(gsv.num_calls() == TIMES)
+        assert_eq!(gsv.num_calls(), TIMES)
     }
 
     #[tokio::test]
