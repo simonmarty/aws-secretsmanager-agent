@@ -455,25 +455,7 @@ mod tests {
 
     use super::*;
 
-    use aws_smithy_runtime_api::{client::http::SharedHttpClient, http::StatusCode};
-
-    fn fake_client(
-        ttl: Option<Duration>,
-        ignore_transient_errors: bool,
-        http_client: Option<SharedHttpClient>,
-        endpoint_url: Option<String>,
-    ) -> SecretsManagerCachingClient {
-        SecretsManagerCachingClient::new(
-            asm_mock::def_fake_client(http_client, endpoint_url),
-            NonZeroUsize::new(1000).unwrap(),
-            match ttl {
-                Some(ttl) => ttl,
-                None => Duration::from_secs(1000),
-            },
-            ignore_transient_errors,
-        )
-        .expect("client should create")
-    }
+    use aws_smithy_runtime_api::http::StatusCode;
 
     #[tokio::test]
     async fn test_get_secret_value() {
@@ -1123,41 +1105,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_is_current_describe_timeout_error_succeeds() {
-        // TODO: Figure out how to do this with mocks
-        use asm_mock::GSV_BODY;
-        use aws_smithy_runtime::client::http::test_util::wire::{ReplayedEvent, WireMockServer};
-
-        let mock = WireMockServer::start(vec![
-            ReplayedEvent::with_body(GSV_BODY),
-            ReplayedEvent::Timeout,
-        ])
-        .await;
-        let client = fake_client(
-            Some(Duration::from_secs(0)),
-            true,
-            Some(mock.http_client()),
-            Some(mock.endpoint_url()),
-        );
-        let secret_id = "DESCRIBETIMEOUT_test_secret";
-        let version_id = Some("test_version");
-
-        let res1 = client
-            .get_secret_value(secret_id, version_id, None, false)
-            .await
-            .unwrap();
-
-        let res2 = client
-            .get_secret_value(secret_id, version_id, None, false)
-            .await
-            .unwrap();
-
-        mock.shutdown();
-
-        assert_eq!(res1, res2)
-    }
-
-    #[tokio::test]
     async fn test_is_current_describe_service_error_succeeds() {
         let secret_id = "DESCRIBESERVICEERROR_test_secret";
         let version_id = "test_version";
@@ -1215,49 +1162,6 @@ mod tests {
             .get_secret_value(secret_id, Some(version_id), Some(version_stage), false)
             .await
             .unwrap();
-
-        assert_eq!(res1, res2)
-    }
-
-    #[tokio::test]
-    async fn test_is_current_gsv_timeout_error_succeeds() {
-        use asm_mock::DESC_BODY;
-        use asm_mock::GSV_BODY;
-        use aws_smithy_runtime::client::http::test_util::wire::{ReplayedEvent, WireMockServer};
-
-        let mock = WireMockServer::start(vec![
-            ReplayedEvent::with_body(
-                GSV_BODY
-                    .replace("{{version}}", "old_version")
-                    .replace("{{label}}", "AWSCURRENT"),
-            ),
-            ReplayedEvent::with_body(
-                DESC_BODY
-                    .replace("{{version}}", "new_version")
-                    .replace("{{label}}", "AWSCURRENT"),
-            ),
-            ReplayedEvent::Timeout,
-        ])
-        .await;
-        let client = fake_client(
-            Some(Duration::from_secs(0)),
-            true,
-            Some(mock.http_client()),
-            Some(mock.endpoint_url()),
-        );
-        let secret_id = "GSVTIMEOUT_test_secret";
-
-        let res1 = client
-            .get_secret_value(secret_id, None, None, false)
-            .await
-            .unwrap();
-
-        let res2 = client
-            .get_secret_value(secret_id, None, None, false)
-            .await
-            .unwrap();
-
-        mock.shutdown();
 
         assert_eq!(res1, res2)
     }
@@ -1438,22 +1342,19 @@ mod tests {
         assert_eq!(gsv.num_calls(), 2);
     }
 
-    mod asm_mock {
+    mod wire_tests {
         use aws_sdk_secretsmanager as secretsmanager;
-        use aws_smithy_runtime::client::http::test_util::infallible_client_fn;
-        use aws_smithy_runtime_api::client::http::SharedHttpClient;
-        use aws_smithy_types::body::SdkBody;
-        use aws_smithy_types::timeout::TimeoutConfig;
-        use http::{Request, Response};
-        use secretsmanager::config::BehaviorVersion;
-        use serde_json::Value;
-        use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-        pub const FAKE_ARN: &str =
-            "arn:aws:secretsmanager:us-west-2:123456789012:secret:{{name}}-NhBWsc";
-        pub const DEFAULT_VERSION: &str = "5767290c-d089-49ed-b97c-17086f8c9d79";
-        pub const DEFAULT_LABEL: &str = "AWSCURRENT";
-        pub const DEFAULT_SECRET_STRING: &str = "hunter2";
+        use aws_smithy_runtime::client::http::test_util::wire::WireMockServer;
+        use aws_smithy_runtime_api::client::http::SharedHttpClient;
+
+        use aws_smithy_types::timeout::TimeoutConfig;
+
+        use secretsmanager::config::BehaviorVersion;
+
+        use std::{num::NonZeroUsize, time::Duration};
+
+        use crate::SecretsManagerCachingClient;
 
         // Template GetSecretValue responses for testing
         pub const GSV_BODY: &str = r###"{
@@ -1483,49 +1384,10 @@ mod tests {
           "CreatedDate": 1569534789.046
         }"###;
 
-        // Private helper to look at the request and provide the correct response.
-        fn format_rsp(req: Request<SdkBody>) -> (u16, String) {
-            let (parts, body) = req.into_parts();
-
-            let req_map: serde_json::Map<String, Value> =
-                serde_json::from_slice(body.bytes().unwrap()).unwrap();
-            let version = req_map
-                .get("VersionId")
-                .map_or(DEFAULT_VERSION, |x| x.as_str().unwrap());
-            let label = req_map
-                .get("VersionStage")
-                .map_or(DEFAULT_LABEL, |x| x.as_str().unwrap());
-            let name = req_map.get("SecretId").unwrap().as_str().unwrap(); // Does not handle full ARN case.
-
-            let secret_string = match name {
-                secret if secret.starts_with("REFRESHNOW") => SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis()
-                    .to_string(),
-                _ => DEFAULT_SECRET_STRING.to_string(),
-            };
-
-            let (code, template) = match parts.headers["x-amz-target"].to_str().unwrap() {
-                "secretsmanager.GetSecretValue" => (200, GSV_BODY),
-                "secretsmanager.DescribeSecret" => (200, DESC_BODY),
-                _ => panic!("Unknown operation"),
-            };
-
-            // Fill in the template and return the response.
-            let rsp = template
-                .replace("{{arn}}", FAKE_ARN)
-                .replace("{{name}}", name)
-                .replace("{{version}}", version)
-                .replace("{{secret}}", &secret_string)
-                .replace("{{label}}", label);
-            (code, rsp)
-        }
-
         // Test client that stubs off network call and provides a canned response.
         pub fn def_fake_client(
-            http_client: Option<SharedHttpClient>,
-            endpoint_url: Option<String>,
+            http_client: SharedHttpClient,
+            endpoint_url: String,
         ) -> secretsmanager::Client {
             let fake_creds = secretsmanager::config::Credentials::new(
                 "AKIDTESTKEY",
@@ -1544,22 +1406,98 @@ mod tests {
                         .operation_attempt_timeout(Duration::from_millis(100))
                         .build(),
                 )
-                .http_client(match http_client {
-                    Some(custom_client) => custom_client,
-                    None => infallible_client_fn(|_req| {
-                        let (code, rsp) = format_rsp(_req);
-                        Response::builder()
-                            .status(code)
-                            .body(SdkBody::from(rsp))
-                            .unwrap()
-                    }),
-                });
-            config_builder = match endpoint_url {
-                Some(endpoint_url) => config_builder.endpoint_url(endpoint_url),
-                None => config_builder,
-            };
+                .http_client(http_client);
+            config_builder = config_builder.endpoint_url(endpoint_url);
 
             secretsmanager::Client::from_conf(config_builder.build())
+        }
+
+        fn fake_client(
+            ttl: Option<Duration>,
+            ignore_transient_errors: bool,
+            wire_server: &WireMockServer,
+        ) -> SecretsManagerCachingClient {
+            SecretsManagerCachingClient::new(
+                def_fake_client(wire_server.http_client(), wire_server.endpoint_url()),
+                NonZeroUsize::new(1000).unwrap(),
+                match ttl {
+                    Some(ttl) => ttl,
+                    None => Duration::from_secs(1000),
+                },
+                ignore_transient_errors,
+            )
+            .expect("client should create")
+        }
+
+        #[tokio::test]
+        async fn test_is_current_gsv_timeout_error_succeeds() {
+            use aws_smithy_runtime::client::http::test_util::wire::{
+                ReplayedEvent, WireMockServer,
+            };
+
+            let mock = WireMockServer::start(vec![
+                ReplayedEvent::with_body(
+                    GSV_BODY
+                        .replace("{{version}}", "old_version")
+                        .replace("{{label}}", "AWSCURRENT"),
+                ),
+                ReplayedEvent::with_body(
+                    DESC_BODY
+                        .replace("{{version}}", "new_version")
+                        .replace("{{label}}", "AWSCURRENT"),
+                ),
+                ReplayedEvent::Timeout,
+            ])
+            .await;
+
+            let client = fake_client(Some(Duration::from_secs(0)), true, &mock);
+
+            let secret_id = "GSVTIMEOUT_test_secret";
+
+            let res1 = client
+                .get_secret_value(secret_id, None, None, false)
+                .await
+                .unwrap();
+
+            let res2 = client
+                .get_secret_value(secret_id, None, None, false)
+                .await
+                .unwrap();
+
+            mock.shutdown();
+
+            assert_eq!(res1, res2)
+        }
+
+        #[tokio::test]
+        async fn test_is_current_describe_timeout_error_succeeds() {
+            // TODO: Figure out how to do this with mocks
+            use aws_smithy_runtime::client::http::test_util::wire::{
+                ReplayedEvent, WireMockServer,
+            };
+
+            let mock = WireMockServer::start(vec![
+                ReplayedEvent::with_body(GSV_BODY),
+                ReplayedEvent::Timeout,
+            ])
+            .await;
+            let client = fake_client(Some(Duration::from_secs(0)), true, &mock);
+            let secret_id = "DESCRIBETIMEOUT_test_secret";
+            let version_id = Some("test_version");
+
+            let res1 = client
+                .get_secret_value(secret_id, version_id, None, false)
+                .await
+                .unwrap();
+
+            let res2 = client
+                .get_secret_value(secret_id, version_id, None, false)
+                .await
+                .unwrap();
+
+            mock.shutdown();
+
+            assert_eq!(res1, res2)
         }
     }
 }
