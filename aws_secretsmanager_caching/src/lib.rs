@@ -455,14 +455,14 @@ mod tests {
 
     use super::*;
 
-    use aws_smithy_runtime_api::http::StatusCode;
+    use aws_smithy_runtime_api::{client::result::SdkError, http::StatusCode};
 
     #[tokio::test]
     async fn test_get_secret_value() {
         let secret_id = "test_secret";
         let arn = "arn";
 
-        let rule = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
+        let gsv = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
             .match_requests(|req| req.secret_id() == Some(secret_id))
             .then_output(move || {
                 GetSecretValueOutput::builder()
@@ -473,7 +473,7 @@ mod tests {
                     .build()
             });
 
-        let asm_mock = mock_client!(aws_sdk_secretsmanager, [&rule]);
+        let asm_mock = mock_client!(aws_sdk_secretsmanager, [&gsv]);
 
         let client = SecretsManagerCachingClient::new(
             asm_mock,
@@ -495,6 +495,7 @@ mod tests {
             response.version_stages,
             Some(vec!["AWSCURRENT".to_string()])
         );
+        assert_eq!(gsv.num_calls(), 1)
     }
 
     #[tokio::test]
@@ -503,7 +504,7 @@ mod tests {
         let version_id = "test_version";
         let arn = "arn";
 
-        let rule = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
+        let gsv = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
             .match_requests(|req| {
                 req.secret_id() == Some(secret_id) && req.version_id() == Some(version_id)
             })
@@ -517,7 +518,7 @@ mod tests {
                     .build()
             });
 
-        let asm_mock = mock_client!(aws_sdk_secretsmanager, [&rule]);
+        let asm_mock = mock_client!(aws_sdk_secretsmanager, [&gsv]);
 
         let client = SecretsManagerCachingClient::new(
             asm_mock,
@@ -540,6 +541,7 @@ mod tests {
             response.version_stages,
             Some(vec!["AWSCURRENT".to_string()])
         );
+        assert_eq!(gsv.num_calls(), 1)
     }
 
     #[tokio::test]
@@ -548,7 +550,7 @@ mod tests {
         let stage_label = "STAGEHERE";
         let arn = "arn";
 
-        let rule = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
+        let gsv = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
             .match_requests(|req| {
                 req.secret_id() == Some(secret_id) && req.version_stage() == Some(stage_label)
             })
@@ -561,7 +563,7 @@ mod tests {
                     .build()
             });
 
-        let asm_mock = mock_client!(aws_sdk_secretsmanager, [&rule]);
+        let asm_mock = mock_client!(aws_sdk_secretsmanager, [&gsv]);
 
         let client = SecretsManagerCachingClient::new(
             asm_mock,
@@ -580,6 +582,7 @@ mod tests {
         assert_eq!(response.secret_string, Some("hunter2".to_string()));
         assert_eq!(response.arn, Some(arn.into()));
         assert_eq!(response.version_stages, Some(vec![stage_label.to_string()]));
+        assert_eq!(gsv.num_calls(), 1)
     }
 
     #[tokio::test]
@@ -589,7 +592,7 @@ mod tests {
         let stage_label = "STAGEHERE";
         let arn = "arn";
 
-        let rule = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
+        let gsv = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
             .match_requests(|req| {
                 req.secret_id() == Some(secret_id)
                     && req.version_stage() == Some(stage_label)
@@ -605,7 +608,7 @@ mod tests {
                     .build()
             });
 
-        let asm_mock = mock_client!(aws_sdk_secretsmanager, [&rule]);
+        let asm_mock = mock_client!(aws_sdk_secretsmanager, [&gsv]);
 
         let client = SecretsManagerCachingClient::new(
             asm_mock,
@@ -625,6 +628,7 @@ mod tests {
         assert_eq!(response.version_id, Some(version_id.to_string()));
         assert_eq!(response.arn, Some(arn.into()));
         assert_eq!(response.version_stages, Some(vec![stage_label.to_string()]));
+        assert_eq!(gsv.num_calls(), 1)
     }
 
     #[tokio::test]
@@ -669,10 +673,8 @@ mod tests {
         )
         .unwrap();
 
-        const TIMES: usize = 2;
-
         // Run through this twice to test the cache expiration
-        for i in 0..TIMES {
+        for i in 0..2 {
             let response = client
                 .get_secret_value(secret_id, None, None, false)
                 .await
@@ -691,7 +693,7 @@ mod tests {
             }
         }
 
-        assert_eq!(gsv.num_calls(), TIMES)
+        assert_eq!(gsv.num_calls(), 2)
     }
 
     #[tokio::test]
@@ -720,13 +722,10 @@ mod tests {
         .unwrap();
         let secret_id = "KMSACCESSDENIEDabcdef";
 
-        if client
-            .get_secret_value(secret_id, None, None, false)
-            .await
-            .is_ok()
-        {
-            panic!()
-        }
+        match client.get_secret_value(secret_id, None, None, false).await {
+            Ok(_) => panic!(),
+            Err(e) => e.to_string().contains("Access to KMS is not allowed"),
+        };
     }
 
     #[tokio::test]
@@ -751,13 +750,14 @@ mod tests {
 
         let secret_id = "NOTFOUNDfasefasef";
 
-        if client
-            .get_secret_value(secret_id, None, None, false)
-            .await
-            .is_ok()
-        {
-            panic!()
-        }
+        match client.get_secret_value(secret_id, None, None, false).await {
+            Ok(_) => panic!(),
+            Err(e) => assert!(e
+                .downcast::<SdkError<GetSecretValueError, HttpResponse>>()
+                .unwrap()
+                .into_service_error()
+                .is_resource_not_found_exception()),
+        };
     }
 
     #[tokio::test]
