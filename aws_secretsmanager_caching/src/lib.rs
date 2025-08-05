@@ -635,7 +635,7 @@ mod tests {
         let arn = "arn";
 
         let gsv = mock!(aws_sdk_secretsmanager::Client::get_secret_value)
-            // .match_requests(|req| req.secret_id() == Some(secret_id))
+            .match_requests(|req| req.secret_id() == Some(secret_id))
             .then_output(move || {
                 GetSecretValueOutput::builder()
                     .name(secret_id)
