@@ -29,9 +29,11 @@ use secret_store::{MemoryStore, SecretStore};
 #[cfg(debug_assertions)]
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use std::{error::Error, num::NonZeroUsize, time::Duration};
+use std::{num::NonZeroUsize, time::Duration};
 use tokio::sync::RwLock;
 use utils::CachingLibraryInterceptor;
+
+use crate::error::SecretsManagerCachingClientError;
 
 /// AWS Secrets Manager Caching client
 #[derive(Debug)]
@@ -86,8 +88,8 @@ impl SecretsManagerCachingClient {
         max_size: NonZeroUsize,
         ttl: Duration,
         ignore_transient_errors: bool,
-    ) -> Result<Self, SecretStoreError> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             asm_client,
             store: RwLock::new(Box::new(MemoryStore::new(max_size, ttl))),
             ignore_transient_errors,
@@ -97,7 +99,7 @@ impl SecretsManagerCachingClient {
                 misses: AtomicU32::new(0),
                 refreshes: AtomicU32::new(0),
             },
-        })
+        }
     }
 
     /// Create a new caching client with in-memory store and the default AWS SDK client configuration
@@ -118,7 +120,7 @@ impl SecretsManagerCachingClient {
     /// ).await.unwrap();
     /// })
     /// ```
-    pub async fn default(max_size: NonZeroUsize, ttl: Duration) -> Result<Self, SecretStoreError> {
+    pub async fn default(max_size: NonZeroUsize, ttl: Duration) -> Self {
         let default_config = &aws_config::load_defaults(BehaviorVersion::latest()).await;
         let asm_builder = aws_sdk_secretsmanager::config::Builder::from(default_config)
             .interceptor(CachingLibraryInterceptor);
@@ -164,7 +166,7 @@ impl SecretsManagerCachingClient {
         max_size: NonZeroUsize,
         ttl: Duration,
         ignore_transient_errors: bool,
-    ) -> Result<Self, SecretStoreError> {
+    ) -> Self {
         let asm_client = SecretsManagerClient::from_conf(
             asm_builder.interceptor(CachingLibraryInterceptor).build(),
         );
@@ -185,7 +187,7 @@ impl SecretsManagerCachingClient {
         version_id: Option<&str>,
         version_stage: Option<&str>,
         refresh_now: bool,
-    ) -> Result<GetSecretValueOutputDef, Box<dyn Error>> {
+    ) -> Result<GetSecretValueOutputDef, SecretsManagerCachingClientError> {
         if refresh_now {
             #[cfg(debug_assertions)]
             {
@@ -205,9 +207,9 @@ impl SecretsManagerCachingClient {
                 );
             }
 
-            return Ok(self
+            return self
                 .refresh_secret_value(secret_id, version_id, version_stage, None)
-                .await?);
+                .await;
         }
 
         let read_lock = self.store.read().await;
@@ -280,7 +282,7 @@ impl SecretsManagerCachingClient {
                     .refresh_secret_value(secret_id, version_id, version_stage, Some(cached_value))
                     .await?)
             }
-            Err(e) => Err(Box::new(e)),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -297,7 +299,7 @@ impl SecretsManagerCachingClient {
         version_id: Option<&str>,
         version_stage: Option<&str>,
         cached_value: Option<Box<GetSecretValueOutputDef>>,
-    ) -> Result<GetSecretValueOutputDef, Box<dyn Error>> {
+    ) -> Result<GetSecretValueOutputDef, SecretsManagerCachingClientError> {
         if let Some(ref cached_value) = cached_value {
             // The cache already had a value in it, we can quick-refresh it if the value is still current.
             if self
@@ -360,7 +362,7 @@ impl SecretsManagerCachingClient {
         version_id: Option<&str>,
         version_stage: Option<&str>,
         cached_value: Box<GetSecretValueOutputDef>,
-    ) -> Result<bool, Box<dyn Error>> {
+    ) -> Result<bool, SecretsManagerCachingClientError> {
         let describe = match self
             .asm_client
             .describe_secret()
@@ -421,7 +423,7 @@ impl SecretsManagerCachingClient {
     }
 
     #[cfg(debug_assertions)]
-    fn increment_counter(&self, counter: &AtomicU32) -> () {
+    fn increment_counter(&self, counter: &AtomicU32) {
         counter.fetch_add(1, Ordering::Relaxed);
     }
 
@@ -454,7 +456,6 @@ mod tests {
             },
             ignore_transient_errors,
         )
-        .expect("client should create")
     }
 
     #[tokio::test]

@@ -13,38 +13,6 @@ use std::env::var; // Use the real std::env::var
 #[cfg(test)]
 use tests::var_test as var;
 
-/// Helper to format error response body in Coral JSON 1.1 format.
-///
-/// Callers need to pass in the error code (e.g.  InternalFailure,
-/// InvalidParameterException, ect.) and the error message. This function will
-/// then format a response body in JSON 1.1 format.
-///
-/// # Arguments
-///
-/// * `err_code` - The modeled exception name or InternalFailure for 500s.
-/// * `msg` - The optional error message or "" for InternalFailure.
-///
-/// # Returns
-///
-/// * `String` - The JSON 1.1 response body.
-///
-/// # Example
-///
-/// ```
-/// assert_eq!(err_response("InternalFailure", ""), "{\"__type\":\"InternalFailure\"}");
-/// assert_eq!(
-///     err_response("ResourceNotFoundException", "Secrets Manager can't find the specified secret."),
-///     "{\"__type\":\"ResourceNotFoundException\",\"message\":\"Secrets Manager can't find the specified secret.\"}"
-/// );
-/// ```
-#[doc(hidden)]
-pub fn err_response(err_code: &str, msg: &str) -> String {
-    if msg.is_empty() || err_code == "InternalFailure" {
-        return String::from("{\"__type\":\"InternalFailure\"}");
-    }
-    format!("{{\"__type\":\"{err_code}\", \"message\":\"{msg}\"}}")
-}
-
 /// Helper function to get the SSRF token value.
 ///
 /// Reads the SSRF token from the configured env variable. If the env variable
