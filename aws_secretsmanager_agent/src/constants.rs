@@ -13,15 +13,15 @@ pub const EMPTY_ENV_LIST_MSG: &str =
 pub const BAD_PREFIX_MSG: &str =
     "The path prefix specified in the configuration file must begin with /.";
 
-/// Other constants that are used across the code base.
+// Other constants that are used across the code base.
 
-// The application name.
+/// The application name.
 pub const APPNAME: &str = "aws-secrets-manager-agent";
-// The build version of the agent
+/// The build version of the agent
 pub const VERSION: Option<&'static str> = option_env!("CARGO_PKG_VERSION");
-// The maximum for incoming connections need to be relatively high, since during periods of high latency, we can easily have many outstanding connections on a very busy box.
+/// The maximum for incoming connections need to be relatively high, since during periods of high latency, we can easily have many outstanding connections on a very busy box.
 pub const DEFAULT_MAX_CONNECTIONS: &str = "800";
-// The max request time
+/// The max request time
 pub const MAX_REQ_TIME_SEC: u64 = 61;
-// The max buffer size
+/// The max buffer size
 pub const MAX_BUF_BYTES: usize = (65 + 256) * 1024; // 321 KB

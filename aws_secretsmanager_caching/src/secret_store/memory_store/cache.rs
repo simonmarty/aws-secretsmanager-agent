@@ -94,12 +94,12 @@ mod tests {
         cache.insert("test3".to_string(), 3);
         cache.insert("test4".to_string(), 4);
         assert_eq!(cache.len(), 4);
-        let items: Vec<usize> = cache.entries.iter().map(|t| (*t.1)).collect();
+        let items: Vec<usize> = cache.entries.iter().map(|t| *t.1).collect();
         assert_eq!(items, [1, 2, 3, 4]);
 
         cache.insert("test5".to_string(), 5);
         assert_eq!(cache.len(), 4);
-        let items: Vec<usize> = cache.entries.iter().map(|t| (*t.1)).collect();
+        let items: Vec<usize> = cache.entries.iter().map(|t| *t.1).collect();
         assert_eq!(items, [2, 3, 4, 5]);
     }
 
@@ -110,7 +110,7 @@ mod tests {
         cache.insert("test1".to_string(), 1);
         cache.insert("test1".to_string(), 2);
         assert_eq!(cache.len(), 1);
-        let items: Vec<usize> = cache.entries.iter().map(|t| (*t.1)).collect();
+        let items: Vec<usize> = cache.entries.iter().map(|t| *t.1).collect();
         assert_eq!(items, [2]);
     }
 }
