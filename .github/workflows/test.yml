@@ -1,0 +1,20 @@
+name: test
+on:
+    workflow_dispatch:
+
+permissions:
+    id-token: write
+    contents: read
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Configure AWS Credentials
+              uses: aws-actions/configure-aws-credentials@v5
+              with:
+                aws-region: us-west-2
+                role-to-assume: ${{ secrets.ROLE_ARN }}
+                role-session-name: secrets-manager-agent-ci-${{ github.run_id }}
+            - run: aws secretsmanager describe-secret --secret-id MySecret
+            - run: echo $AWS_REGION $AWS_DEFAULT_REGION
