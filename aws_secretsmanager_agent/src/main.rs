@@ -1,3 +1,5 @@
+#[cfg(feature = "profiling")]
+use async_profiler_agent::profiler::ProfilerBuilder;
 use log::{error, info};
 use tokio::net::TcpListener;
 
@@ -27,6 +29,9 @@ use utils::get_token;
 /// * `Box<dyn std::error::Error>>` - Retruned for errors initializing the agent.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(feature = "profiling")]
+    ProfilerBuilder::default().build().spawn()?;
+
     run(env::args(), &report, &forever).await
 }
 

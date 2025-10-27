@@ -29,6 +29,7 @@ log = "0.4.20"
 log4rs = { version = "1.2.0", features = ["gzip"] }
 url = "2"
 aws_secretsmanager_caching = { version = "2.0.0", path = "../aws_secretsmanager_caching" }
+async-profiler-agent = { version = "0.1.9", optional = true }
 
 # For unit tests
 [dev-dependencies]
@@ -40,3 +41,4 @@ aws-smithy-types = "1"
 
 [features]
 fips = ["aws_secretsmanager_caching/fips"]
+profiling = ["dep:async-profiler-agent"]
