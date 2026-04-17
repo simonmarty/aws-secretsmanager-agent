@@ -21,7 +21,17 @@ jobs:
 
       - name: Log toolchain versions
         run: rustup --version && rustc --version && cargo --version
-
+      - name: Restore cached dependencies
+        uses: actions/cache/restore@v5
+        id: cache-restore
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - name: Run benchmarks
         working-directory: aws_secretsmanager_caching
         run: cargo bench --bench benchmark -- --output-format bencher | tee ../bench-result.txt
