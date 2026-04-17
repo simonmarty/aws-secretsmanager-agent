@@ -42,7 +42,6 @@ jobs:
           name: Secrets Manager Agent Benchmarks
           tool: cargo
           output-file-path: bench-result.txt
-          external-data-json-path: ./cache/benchmark-data.json
           github-token: ${{ secrets.GITHUB_TOKEN }}
           comment-on-alert: true
           summary-always: true
