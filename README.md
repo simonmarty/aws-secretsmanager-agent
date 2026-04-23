@@ -597,3 +597,4 @@ The integration tests are organized into the following modules:
 - **`version_management.rs`** - Tests secret version transitions and rotation scenarios
 - **`configuration.rs`** - Tests configuration parameters including health checks and path-based requests
 - **`file_credentials.rs`** - Tests file-based credential loading including valid/invalid/missing credentials, self-healing (credentials appearing after startup), and credential rotation
+
