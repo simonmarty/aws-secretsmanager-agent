@@ -10,6 +10,9 @@ env:
 permissions:
   contents: read
   id-token: write
+  # Needed for integration tests
+  pull-requests: write
+  issues: write
 
 jobs:
   integ:
